@@ -65,13 +65,13 @@ class Vocabulary(object):
         return len(self.word2idx)
 
     def save(self, location):
-        with open(location, 'wb') as f:
+        with open(location, 'w') as f:
             json.dump({'word2idx': self.word2idx,
                        'idx2word': self.idx2word,
                        'idx': self.idx}, f)
 
     def load(self, location):
-        with open(location, 'rb') as f:
+        with open(location, 'r') as f:
             data = json.load(f)
             self.word2idx = data['word2idx']
             self.idx2word = data['idx2word']

@@ -26,7 +26,7 @@ def process_text(text, vocab, max_length=20):
     """
     tokens = tokenize(text.lower().strip())
     output = []
-    output.append(vocab(vocab.SYM_SOQ))  # <start>
+    output.append(vocagit (vocab.SYM_SOQ))  # <start>
     output.extend([vocab(token) for token in tokens])
     output.append(vocab(vocab.SYM_EOS))  # <end>
     length = min(max_length, len(output))
