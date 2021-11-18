@@ -1,4 +1,4 @@
-"""Transform all the IQ VQA dataset into a hdf5 dataset.
+    """Transform all the IQ VQA dataset into a hdf5 dataset.
 """
 
 from PIL import Image
@@ -68,8 +68,8 @@ def save_dataset(image_dir, questions, annotations, vocab, ans2cat, output,
     qid2ans, image_ids = create_answer_mapping(annos, ans2cat)
     total_questions = len(qid2ans.keys())
     total_images = len(image_ids)
-    print "Number of images to be written: %d" % total_images
-    print "Number of QAs to be written: %d" % total_questions
+    print("Number of images to be written: %d" % total_images)
+    print("Number of QAs to be written: %d" % total_questions)ƒ
 
     h5file = h5py.File(output, "w")
     d_questions = h5file.create_dataset(
@@ -122,8 +122,8 @@ def save_dataset(image_dir, questions, annotations, vocab, ans2cat, output,
         q_index += 1
         bar.update(q_index)
     h5file.close()
-    print "Number of images written: %d" % i_index
-    print "Number of QAs written: %d" % q_index
+    print("Number of images written: %d" % i_index)
+    print("Number of QAs written: %d" % q_index)
 
 
 if __name__ == '__main__':
