@@ -56,6 +56,7 @@ def tokenize(sentence):
     Returns:
         A list of words.
     """
+    sentence = sentence.decode('utf-8')
     if len(sentence) == 0:
         return []
     sentence = re.sub('\.+', r'.', sentence)
@@ -63,7 +64,7 @@ def tokenize(sentence):
     sentence = re.sub('\s+', ' ', sentence)
 
     tokens = nltk.tokenize.word_tokenize(
-            sentence.strip().lower().decode('utf8'))
+            sentence.strip().lower())
     return tokens
 
 
@@ -142,3 +143,4 @@ if __name__ == '__main__':
     logging.info("Total vocabulary size: %d" % len(vocab))
     vocab.save(args.vocab_path)
     logging.info("Saved the vocabulary wrapper to '%s'" % args.vocab_path)
+
