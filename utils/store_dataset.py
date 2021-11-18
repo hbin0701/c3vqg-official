@@ -69,7 +69,7 @@ def save_dataset(image_dir, questions, annotations, vocab, ans2cat, output,
     total_questions = len(qid2ans.keys())
     total_images = len(image_ids)
     print("Number of images to be written: %d" % total_images)
-    print("Number of QAs to be written: %d" % total_questions)ƒ
+    print("Number of QAs to be written: %d" % total_questions)
 
     h5file = h5py.File(output, "w")
     d_questions = h5file.create_dataset(
