@@ -34,6 +34,7 @@ class MLP(nn.Module):
                 idim = input_size
             if i == num_layers-1:
                 odim = num_classes
+            idim, odim = int(idim), int(odim)
             fc = nn.Linear(idim, odim)
             fc.weight.data.normal_(0.0,  math.sqrt(2. / idim))
             # nn.init.kaiming_normal_(fc.weight,nonlinearity='relu')
