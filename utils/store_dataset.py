@@ -1,181 +1,147 @@
-    """Transform all the IQ VQA dataset into a hdf5 dataset.
+"""Creates a vocabulary using iq_dataset for the vqa dataset.
 """
 
-from PIL import Image
-from torchvision import transforms
+from collections import Counter
+from train_utils import Vocabulary
 
 import argparse
 import json
-import h5py
+import logging
+import nltk
 import numpy as np
-import os
-import progressbar
-
-from train_utils import Vocabulary
-from vocab import load_vocab
-from vocab import process_text
+import re
 
 
-def create_answer_mapping(annotations, ans2cat):
-    """Returns mapping from question_id to answer.
-
-    Only returns those mappings that map to one of the answers in ans2cat.
+def process_text(text, vocab, max_length=20):
+    """Converts text into a list of tokens surrounded by <start> and <end>.
 
     Args:
-        annotations: VQA annotations file.
-        ans2cat: Map from answers to answer categories that we care about.
+        text: String text.
+        vocab: The vocabulary instance.
+        max_length: The max allowed length.
 
     Returns:
-        answers: Mapping from question ids to answers.
-        image_ids: Set of image ids.
+        output: An numpy array with tokenized text.
+        length: The length of the text.
     """
-    answers = {}
-    image_ids = set()
-    for q in annotations['annotations']:
-        question_id = q['question_id']
-        answer = q['multiple_choice_answer']
-        if answer in ans2cat:
-            answers[question_id] = answer
-            image_ids.add(q['image_id'])
-    return answers, image_ids
+    tokens = tokenize(text.lower().strip())
+    output = []
+    output.append(vocab(vocab.SYM_SOQ))  # <start>
+    output.extend([vocab(token) for token in tokens])
+    output.append(vocab(vocab.SYM_EOS))  # <end>
+    length = min(max_length, len(output))
+    return np.array(output[:length]), length
 
 
-def save_dataset(image_dir, questions, annotations, vocab, ans2cat, output,
-                 im_size=224, max_q_length=20, max_a_length=4,
-                 with_answers=False):
-    """Saves the Visual Genome images and the questions in a hdf5 file.
+def load_vocab(vocab_path):
+    """Load Vocabulary object from a pickle file.
 
     Args:
-        image_dir: Directory with all the images.
-        questions: Location of the questions.
-        annotations: Location of all the annotations.
-        vocab: Location of the vocab file.
-        ans2cat: Mapping from answers to category.
-        output: Location of the hdf5 file to save to.
-        im_size: Size of image.
-        max_q_length: Maximum length of the questions.
-        max_a_length: Maximum length of the answers.
-        with_answers: Whether to also save the answers.
+        vocab_path: The location of the vocab pickle file.
+
+    Returns:
+        A Vocabulary object.
     """
-    # Load the data.
-    vocab = load_vocab(vocab)
-    with open(annotations) as f:
-        annos = json.load(f)
+    vocab = Vocabulary()
+    vocab.load(vocab_path)
+    return vocab
+
+
+def tokenize(sentence):
+    """Tokenizes a sentence into words.
+
+    Args:
+        sentence: A string of words.
+
+    Returns:
+        A list of words.
+    """
+    if type(sentence) == bytes:
+        sentence = sentence.decode('utf-8')
+    if len(sentence) == 0:
+        return []
+    sentence = re.sub('\.+', r'.', sentence)
+    sentence = re.sub('([a-z])([.,!?()])', r'\1 \2 ', sentence)
+    sentence = re.sub('\s+', ' ', sentence)
+
+    tokens = nltk.tokenize.word_tokenize(
+            sentence.strip().lower())
+    return tokens
+
+
+def build_vocab(questions, cat2ans, threshold):
+    """Build a vocabulary from the annotations.
+
+    Args:
+        annotations: A json file containing the questions and answers.
+        cat2ans: A json file containing answer types.
+        threshold: The minimum number of times a work must occur. Otherwise it
+            is treated as an `Vocabulary.SYM_UNK`.
+
+    Returns:
+        A Vocabulary object.
+    """
     with open(questions) as f:
         questions = json.load(f)
+    with open(cat2ans) as f:
+        cat2ans = json.load(f)
 
-    # Get the mappings from qid to answers.
-    qid2ans, image_ids = create_answer_mapping(annos, ans2cat)
-    total_questions = len(qid2ans.keys())
-    total_images = len(image_ids)
-    print("Number of images to be written: %d" % total_images)
-    print("Number of QAs to be written: %d" % total_questions)ƒ
+    words = []
+    for category in cat2ans:
+        for answer in cat2ans[category]:
+            answer = tokenize(answer.encode('utf8'))
+            words.extend(answer)
 
-    h5file = h5py.File(output, "w")
-    d_questions = h5file.create_dataset(
-        "questions", (total_questions, max_q_length), dtype='i')
-    d_indices = h5file.create_dataset(
-        "image_indices", (total_questions,), dtype='i')
-    d_images = h5file.create_dataset(
-        "images", (total_images, im_size, im_size, 3), dtype='f')
-    d_answers = h5file.create_dataset(
-        "answers", (total_questions, max_a_length), dtype='i')
-    d_answer_types = h5file.create_dataset(
-        "answer_types", (total_questions,), dtype='i')
+    counter = Counter()
+    for i, entry in enumerate(questions['questions']):
+        question = entry["question"].encode('utf8')
+        q_tokens = tokenize(question)
+        counter.update(q_tokens)
 
-    # Create the transforms we want to apply to every image.
-    transform = transforms.Compose([
-        transforms.Resize((im_size, im_size))])
+        if i % 1000 == 0:
+            logging.info("Tokenized %d questions." % (i))
 
-    # Iterate and save all the questions and images.
-    bar = progressbar.ProgressBar(maxval=total_questions)
-    i_index = 0
-    q_index = 0
-    done_img2idx = {}
-    for entry in questions['questions']:
-        image_id = entry['image_id']
-        question_id = entry['question_id']
-        if image_id not in image_ids:
-            continue
-        if question_id not in qid2ans:
-            continue
-        if image_id not in done_img2idx:
-            try:
-                path = "%d.jpg" % (image_id)
-                image = Image.open(os.path.join(image_dir, path)).convert('RGB')
-            except IOError:
-                path = "%012d.jpg" % (image_id)
-                image = Image.open(os.path.join(image_dir, path)).convert('RGB')
-            image = transform(image)
-            d_images[i_index, :, :, :] = np.array(image)
-            done_img2idx[image_id] = i_index
-            i_index += 1
-        q, length = process_text(entry['question'], vocab,
-                                 max_length=max_q_length)
-        d_questions[q_index, :length] = q
-        answer = qid2ans[question_id]
-        a, length = process_text(answer, vocab,
-                                 max_length=max_a_length)
-        d_answers[q_index, :length] = a
-        d_answer_types[q_index] = int(ans2cat[answer])
-        d_indices[q_index] = done_img2idx[image_id]
-        q_index += 1
-        bar.update(q_index)
-    h5file.close()
-    print("Number of images written: %d" % i_index)
-    print("Number of QAs written: %d" % q_index)
+    # If a word frequency is less than 'threshold', then the word is discarded.
+    words.extend([word for word, cnt in counter.items() if cnt >= threshold])
+    words = list(set(words))
+    vocab = create_vocab(words)
+    return vocab
+
+
+def create_vocab(words):
+    # Adds the words to the vocabulary.
+    vocab = Vocabulary()
+    for i, word in enumerate(words):
+        vocab.add_word(word)
+    return vocab
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Inputs.
-    parser.add_argument('--image-dir', type=str, default='data/vqa/train2014',
-                        help='directory for resized images')
     parser.add_argument('--questions', type=str,
                         default='data/vqa/v2_OpenEnded_mscoco_'
                         'train2014_questions.json',
-                        help='Path for train annotation file.')
-    parser.add_argument('--annotations', type=str,
-                        default='data/vqa/v2_mscoco_'
-                        'train2014_annotations.json',
-                        help='Path for train annotation file.')
+                        help='Path for train questions file.')
     parser.add_argument('--cat2ans', type=str,
                         default='data/vqa/iq_dataset.json',
                         help='Path for the answer types.')
+
+    # Hyperparameters.
+    parser.add_argument('--threshold', type=int, default=4,
+                        help='Minimum word count threshold.')
+
+    # Outputs.
     parser.add_argument('--vocab-path', type=str,
                         default='data/processed/vocab_iq.json',
                         help='Path for saving vocabulary wrapper.')
-
-    # Outputs.
-    parser.add_argument('--output', type=str,
-                        default='data/processed/iq_dataset.hdf5',
-                        help='directory for resized images.')
-    parser.add_argument('--cat2name', type=str,
-                        default='data/processed/cat2name.json',
-                        help='Location of mapping from category to type name.')
-
-    # Hyperparameters.
-    parser.add_argument('--im_size', type=int, default=224,
-                        help='Size of images.')
-    parser.add_argument('--max-q-length', type=int, default=20,
-                        help='maximum sequence length for questions.')
-    parser.add_argument('--max-a-length', type=int, default=4,
-                        help='maximum sequence length for answers.')
     args = parser.parse_args()
 
-    ans2cat = {}
-    with open(args.cat2ans) as f:
-        cat2ans = json.load(f)
-    cats = sorted(cat2ans.keys())
-    with open(args.cat2name, 'w') as f:
-        json.dump(cats, f)
-    for cat in cat2ans:
-        for ans in cat2ans[cat]:
-            ans2cat[ans] = cats.index(cat)
-    save_dataset(args.image_dir, args.questions, args.annotations, args.vocab_path,
-                 ans2cat, args.output, im_size=args.im_size,
-                 max_q_length=args.max_q_length, max_a_length=args.max_a_length)
-    print('Wrote dataset to %s' % args.output)
-    # Hack to avoid import errors.
-    Vocabulary()
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    vocab = build_vocab(args.questions, args.cat2ans, args.threshold)
+    logging.info("Total vocabulary size: %d" % len(vocab))
+    vocab.save(args.vocab_path)
+    logging.info("Saved the vocabulary wrapper to '%s'" % args.vocab_path)
+
