@@ -117,7 +117,7 @@ class IQ(nn.Module):
 
     def reparameterize(self, mu, logvar):
         std = logvar.mul(0.5).exp_()
-        eps = Variable((Normal(torch.zeros_like(mu).cuda(), self.alpha.data.pow(-1))).sample())
+        eps = Variable((Normal(torch.zeros_like(mu).cuda(), abs(self.alpha.data.pow(-1)))).sample())
         return eps.mul(std).add_(mu)
 
     def flatten_parameters(self):
