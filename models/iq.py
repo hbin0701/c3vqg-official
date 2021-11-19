@@ -11,7 +11,7 @@ from .encoder_rnn import EncoderRNN
 from .decoder_rnn import DecoderRNN
 from .mlp import MLP
 from .gen_ques_rnn import genQLSTM
-
+import numpy as np
 
 class IQ(nn.Module):
     """Information Maximization question generation.
@@ -25,7 +25,6 @@ class IQ(nn.Module):
                  embedding=None, z_size=64, z_img=512, z_category=4,
                  no_image_recon=False, no_category_space=False, bayes=False):
         """Constructor for IQ.
-
         Args:
             vocab_size: Number of words in the vocabulary.
             max_len: The maximum length of the answers we generate.
@@ -62,18 +61,18 @@ class IQ(nn.Module):
         if self.category_space:
             self.category_embedding = nn.Embedding(num_categories, 8)
             self.category_encoder = MLP(8, 8, z_category,
-                                        num_layers=2)
+                               num_layers=2)
 
         self.question_encoder = EncoderRNN(vocab_size, max_len, hidden_size, ques_encoder=True,
-                                           input_dropout_p=input_dropout_p,
-                                           dropout_p=dropout_p,
-                                           n_layers=num_layers,
-                                           bidirectional=False,
-                                           rnn_cell=rnn_cell,
-                                           variable_lengths=True)
+                                 input_dropout_p=input_dropout_p,
+                                 dropout_p=dropout_p,
+                                 n_layers=num_layers,
+                                 bidirectional=False,
+                                 rnn_cell=rnn_cell,
+                                 variable_lengths=True)
 
         self.q_to_c = MLP(hidden_size, num_categories, num_categories,
-                          num_layers=num_layers)
+                               num_layers=num_layers)
 
         # Setup stacked attention to combine image and category features.
         if self.category_space:
@@ -95,6 +94,8 @@ class IQ(nn.Module):
                                   dropout_p=dropout_p,
                                   embedding=embedding)
 
+        self.softplus = nn.Softplus()
+
         # Setup encodering to t space.
         if self.category_space:
             self.mu_category_encoder = nn.Linear(hidden_size // 4, z_size)
@@ -103,21 +104,28 @@ class IQ(nn.Module):
         # Setup image reconstruction.
         if self.image_recon:
             self.image_reconstructor = MLP(
-                z_size, att_ff_size, z_img,
-                num_layers=num_att_layers)
+                    z_size, att_ff_size, z_img,
+                    num_layers=num_att_layers)
 
         # Setup category reconstruction.
         if self.category_space:
             self.category_reconstructor = MLP(
-                z_size, att_ff_size / 2, z_category,
-                num_layers=num_att_layers, dropout_p=0.3)
+                   z_size, att_ff_size / 2, z_category,
+                   num_layers=num_att_layers,dropout_p=0.3)
             # self.category_reconstructor = MLP(                                     # for best model trained st1+2+cl+bayes
             #        z_size, hidden_size, num_categories,
             #        num_layers=num_att_layers,dropout_p=0.3)
 
     def reparameterize(self, mu, logvar):
         std = logvar.mul(0.5).exp_()
-        eps = Variable((Normal(torch.zeros_like(mu).cuda(), abs(self.alpha.data.pow(-1)))).sample())
+        d = self.alpha.data.pow(-1)
+        d = torch.nan_to_num(d.clamp(min=1e-5, max=2), 2)
+
+        try:
+          eps = Variable((Normal(torch.zeros_like(mu).cuda(), d)).sample())
+        except:
+          torch.save(d, "problem.pt")
+          assert(False)
         return eps.mul(std).add_(mu)
 
     def flatten_parameters(self):
@@ -133,7 +141,7 @@ class IQ(nn.Module):
 
     def cycle_params(self):
         params = (list(self.question_encoder.parameters()) +
-                  list(self.q_to_c.parameters()))
+                list(self.q_to_c.parameters()))
 
         params = filter(lambda p: p.requires_grad, params)
         return params
@@ -154,20 +162,17 @@ class IQ(nn.Module):
         return params
 
     def reparameterize_prev(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
+        std = torch.exp(0.5*logvar)
         eps = torch.randn_like(std)
         return eps.mul(std).add_(mu)
 
     def modify_hidden(self, func, hidden, rnn_cell):
         """Applies the function func to the hidden representation.
-
         This method is useful because some RNNs like LSTMs have a tuples.
-
         Args:
             func: A function to apply to the hidden representation.
             hidden: A RNN (or LSTM or GRU) representation.
             rnn_cell: One of RNN, LSTM or GRU.
-
         Returns:
             func(hidden).
         """
@@ -177,10 +182,8 @@ class IQ(nn.Module):
 
     def parse_outputs_to_tokens(self, outputs):
         """Converts model outputs to tokens.
-
         Args:
             outputs: Model outputs.
-
         Returns:
             A tensor of batch_size X max_len.
         """
@@ -196,10 +199,8 @@ class IQ(nn.Module):
 
     def encode_images(self, images):
         """Encodes images.
-
         Args:
             images: Batch of image Tensors.
-
         Returns:
             Batch of image features.
         """
@@ -207,10 +208,8 @@ class IQ(nn.Module):
 
     def encode_categories(self, categories):
         """Encode categories.
-
         Args:
             categories: Batch of category Tensors.
-
         Returns:
             Batch of categories encoded into features.
         """
@@ -251,7 +250,6 @@ class IQ(nn.Module):
 
     def encode_into_t(self, image_features, category_features):
         """Encodes the attended features into t space.
-
         Args:
             image_features: Batch of image features.
             category_features: Batch of category features.
@@ -265,7 +263,7 @@ class IQ(nn.Module):
         mus = self.mu_category_encoder(attended_hiddens)
         logvars = self.logvar_category_encoder(attended_hiddens)
 
-        if (self.bayes == True):
+        if(self.bayes==True):
             zs = self.reparameterize(mus, logvars)
         else:
             zs = self.reparameterize_prev(mus, logvars)
@@ -276,7 +274,6 @@ class IQ(nn.Module):
                          questions=None, teacher_forcing_ratio=0,
                          decode_function=F.log_softmax):
         """Decodes the question from the latent space.
-
         Args:
             image_features: Batch of image features.
             ts: Batch of latent space representations from categories.
@@ -314,7 +311,6 @@ class IQ(nn.Module):
     def forward(self, images, answers, categories, alengths=None, questions=None,
                 teacher_forcing_ratio=0, decode_function=F.log_softmax):
         """Passes the image and the question through a model and generates answers.
-
         Args:
             images: Batch of image Variables.
             answers: Batch of answer Variables.
@@ -324,7 +320,6 @@ class IQ(nn.Module):
             teacher_forcing_ratio: Whether to predict with teacher forcing.
             decode_function: What to use when choosing a word from the
                 distribution over the vocabulary.
-
         Returns:
             - outputs: The output scores for all steps in the RNN.
             - hidden: The hidden states of all the RNNs.
@@ -333,9 +328,10 @@ class IQ(nn.Module):
         # features is (N * HIDDEN_SIZE)
         image_features = self.encode_images(images)
 
+
         # Calculate the mus and logvars.
 
-        if (self.bayes == True):
+        if(self.bayes==True):
             zs = self.reparameterize(mus, logvars)
         else:
             zs = self.reparameterize_prev(mus, logvars)
@@ -348,11 +344,9 @@ class IQ(nn.Module):
 
     def reconstruct_inputs(self, image_features, category_features):
         """Reconstructs the image features using the VAE.
-
         Args:
             image_features: Batch of image features.
             category_features: Batch of category features.
-
         Returns:
             Reconstructed image features and category features.
         """
@@ -369,11 +363,9 @@ class IQ(nn.Module):
 
     def encode_from_category(self, images, categories):
         """Encodes images and categories in t-space.
-
         Args:
             images: Batch of image Tensors.
             categories: Batch of category Tensors.
-
         Returns:
             Batch of latent space encodings.
         """
@@ -387,7 +379,6 @@ class IQ(nn.Module):
                               questions=None, teacher_forcing_ratio=0,
                               decode_function=F.log_softmax):
         """Outputs the predicted vocab tokens for the categories in a minibatch.
-
         Args:
             images: Batch of image Variables.
             categories: Batch of category Variables.
@@ -395,14 +386,13 @@ class IQ(nn.Module):
             teacher_forcing_ratio: Whether to predict with teacher forcing.
             decode_function: What to use when choosing a word from the
                 distribution over the vocabulary.
-
         Returns:
             A tensor with BATCH_SIZE X MAX_LEN where each element is the index
             into the vocab word.
         """
         image_features, zs = self.encode_from_category(images, categories)
         outputs, tokens = self.decode_questions(image_features, zs, questions=questions,
-                                                decode_function=decode_function,
-                                                teacher_forcing_ratio=teacher_forcing_ratio)
+                                              decode_function=decode_function,
+                                              teacher_forcing_ratio=teacher_forcing_ratio)
 
         return tokens

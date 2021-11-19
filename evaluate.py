@@ -23,7 +23,7 @@ def evaluate(vqg, data_loader, vocab, args, params):
     """Runs BLEU, METEOR, CIDEr and distinct n-gram scores.
 
     Args:
-        vqg: question generation model.
+            vqg: question generation model.
         data_loader: Iterator for the data.
         args: ArgumentParser object.
         params: ArgumentParser object.
