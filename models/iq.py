@@ -11,7 +11,6 @@ from .encoder_rnn import EncoderRNN
 from .decoder_rnn import DecoderRNN
 from .mlp import MLP
 from .gen_ques_rnn import genQLSTM
-import numpy as np
 
 class IQ(nn.Module):
     """Information Maximization question generation.
@@ -94,8 +93,6 @@ class IQ(nn.Module):
                                   dropout_p=dropout_p,
                                   embedding=embedding)
 
-        self.softplus = nn.Softplus()
-
         # Setup encodering to t space.
         if self.category_space:
             self.mu_category_encoder = nn.Linear(hidden_size // 4, z_size)
@@ -117,16 +114,11 @@ class IQ(nn.Module):
             #        num_layers=num_att_layers,dropout_p=0.3)
 
     def reparameterize(self, mu, logvar):
-        std = logvar.mul(0.5).exp_()
+        std = torch.exp(0.5*logvar)
         d = self.alpha.data.pow(-1)
-        d = torch.nan_to_num(d.clamp(min=1e-5, max=2), 2)
-
-        try:
-          eps = Variable((Normal(torch.zeros_like(mu).cuda(), d)).sample())
-        except:
-          torch.save(d, "problem.pt")
-          assert(False)
-        return eps.mul(std).add_(mu)
+        d = torch.nan_to_num(d.clamp(min=1e-8, max=2), 1e-8)
+        eps = Variable((Normal(torch.zeros_like(mu).cuda(), d)).sample())
+        return eps.mul(std).add_(mu) + 1e-8
 
     def flatten_parameters(self):
         if hasattr(self, 'decoder'):
