@@ -116,7 +116,7 @@ class IQ(nn.Module):
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
         d = self.alpha.data.pow(-1)
-        d = torch.nan_to_num(d.clamp(min=1e-8, max=2), 1e-8)
+        d = torch.nan_to_num(abs(d))
         eps = Variable((Normal(torch.zeros_like(mu).cuda(), d)).sample())
         return eps.mul(std).add_(mu) + 1e-8
 
@@ -254,6 +254,9 @@ class IQ(nn.Module):
         attended_hiddens = self.category_attention(together)
         mus = self.mu_category_encoder(attended_hiddens)
         logvars = self.logvar_category_encoder(attended_hiddens)
+
+        mus = mus.clamp(min=-2, max=2)
+        logvars = logvars.clamp(min=-20, max=20)
 
         if(self.bayes==True):
             zs = self.reparameterize(mus, logvars)

@@ -21,6 +21,7 @@ from utils import gaussian_KL_loss
 
 from center_loss import CenterLoss
 
+
 def create_model(args, vocab, embedding=None):
     if args.use_glove:
         embedding = get_glove_embedding(args.embedding_name,
@@ -43,7 +44,7 @@ def create_model(args, vocab, embedding=None):
              num_att_layers=args.num_att_layers,
              z_size=args.z_size,
              z_img=args.z_img,
-             z_category=args.z_category, 
+             z_category=args.z_category,
              no_image_recon=args.no_image_recon,
              no_category_space=args.no_category_space, bayes=args.bayes)
 
@@ -52,10 +53,10 @@ def create_model(args, vocab, embedding=None):
 
 def evaluate(vqg, data_loader, criterion, l2_criterion, args):
     vqg.eval()
-    
-    if(args.bayes):
+
+    if (args.bayes):
         alpha = vqg.alpha
-    
+
     total_gen_loss = 0.0
     total_kl = 0.0
     total_recon_image_loss = 0.0
@@ -71,7 +72,7 @@ def evaluate(vqg, data_loader, criterion, l2_criterion, args):
         total_steps = min(len(data_loader), args.eval_steps)
     start_time = time.time()
     for iterations, (images, questions, answers,
-            categories, qindices) in enumerate(data_loader):
+                     categories, qindices) in enumerate(data_loader):
 
         ''' remove answers from the dataloader later '''
 
@@ -82,16 +83,16 @@ def evaluate(vqg, data_loader, criterion, l2_criterion, args):
             answers = answers.cuda()
             categories = categories.cuda()
             qindices = qindices.cuda()
-            if(args.bayes):
+            if (args.bayes):
                 alpha = vqg.alpha.cuda()
-        
+
         # Forward, Backward and Optimize
         image_features = vqg.encode_images(images)
         category_features = vqg.encode_categories(categories)
         t_mus, t_logvars, ts = vqg.encode_into_t(image_features, category_features)
         (outputs, _, other), pred_ques = vqg.decode_questions(
-                image_features, ts, questions=questions,
-                teacher_forcing_ratio=1.0)
+            image_features, ts, questions=questions,
+            teacher_forcing_ratio=1.0)
 
         # Reorder the questions based on length.
         questions = torch.index_select(questions, 0, qindices)
@@ -107,10 +108,10 @@ def evaluate(vqg, data_loader, criterion, l2_criterion, args):
         outputs = torch.cat(outputs, dim=1)
         outputs = torch.index_select(outputs, 0, qindices)
 
-        if(args.step_two):
+        if (args.step_two):
             category_cycle = vqg.encode_questions(pred_ques, qlengths)
             category_cycle_loss = criterion(category_cycle, categories)
-        
+
             category_cycle_loss = category_cycle_loss.item()
             total_loss += args.lambda_c_cycle * category_cycle_loss
 
@@ -119,14 +120,15 @@ def evaluate(vqg, data_loader, criterion, l2_criterion, args):
                                        batch_first=True)[0]
         outputs = pack_padded_sequence(outputs, qlengths,
                                        batch_first=True)[0]
-        
+
         gen_loss = criterion(outputs, targets)
         total_gen_loss += gen_loss.data.item()
 
         # Get KL loss if it exists.
-        if(args.bayes):
+        if (args.bayes):
             regularisation_loss = l2_criterion(alpha.pow(-1), torch.ones_like(alpha))
-            kl_loss = -0.5 * torch.sum(1 + t_logvars + alpha.pow(2).log() - alpha.pow(2) * ( t_mus.pow(2) + t_logvars.exp()))
+            kl_loss = -0.5 * torch.sum(
+                1 + t_logvars + alpha.pow(2).log() - alpha.pow(2) * (t_mus.pow(2) + t_logvars.exp()))
             total_kl += kl_loss.item() + regularisation_loss.item()
         else:
             kl_loss = gaussian_KL_loss(t_mus, t_logvars)
@@ -137,13 +139,13 @@ def evaluate(vqg, data_loader, criterion, l2_criterion, args):
         if not args.no_image_recon or not args.no_category_space:
             image_targets = image_features.detach()
             category_targets = category_features.detach()
-            
+
             recon_image_features, recon_category_features = vqg.reconstruct_inputs(image_targets, category_targets)
-            
+
             if not args.no_image_recon:
                 recon_i_loss = l2_criterion(recon_image_features, image_targets)
                 total_recon_image_loss += recon_i_loss.item()
-            
+
             if not args.no_category_space:
                 recon_c_loss = l2_criterion(recon_category_features, category_targets)
                 total_recon_category_loss += recon_c_loss.item()
@@ -154,20 +156,20 @@ def evaluate(vqg, data_loader, criterion, l2_criterion, args):
 
         # Print logs
         if iterations % args.log_step == 0:
-             delta_time = time.time() - start_time
-             start_time = time.time()
-             logging.info('Time: %.4f, Step [%d/%d], gen loss: %.4f, '
-                          'KL: %.4f, I-recon: %.4f, C-recon: %.4f, C-cycle: %.4f, Regularisation: %.4f'
+            delta_time = time.time() - start_time
+            start_time = time.time()
+            logging.info('Time: %.4f, Step [%d/%d], gen loss: %.4f, '
+                         'KL: %.4f, I-recon: %.4f, C-recon: %.4f, C-cycle: %.4f, Regularisation: %.4f'
                          % (delta_time, iterations, total_steps,
-                            total_gen_loss/(iterations+1),
-                            total_kl/(iterations+1),
-                            total_recon_image_loss/(iterations+1),
-                            total_recon_category_loss/(iterations+1),
-                            category_cycle_loss/(iterations+1),
-                            regularisation_loss/(iterations+1)))
+                            total_gen_loss / (iterations + 1),
+                            total_kl / (iterations + 1),
+                            total_recon_image_loss / (iterations + 1),
+                            total_recon_category_loss / (iterations + 1),
+                            category_cycle_loss / (iterations + 1),
+                            regularisation_loss / (iterations + 1)))
 
     total_info_loss = total_recon_image_loss + total_recon_category_loss
-    return total_gen_loss / (iterations+1), total_info_loss / (iterations + 1)
+    return total_gen_loss / (iterations + 1), total_info_loss / (iterations + 1)
 
 
 def run_eval(vqg, data_loader, criterion, l2_criterion, args, epoch,
@@ -175,13 +177,13 @@ def run_eval(vqg, data_loader, criterion, l2_criterion, args, epoch,
     logging.info('=' * 80)
     start_time = time.time()
     val_gen_loss, val_info_loss = evaluate(
-            vqg, data_loader, criterion, l2_criterion, args)
+        vqg, data_loader, criterion, l2_criterion, args)
     delta_time = time.time() - start_time
     scheduler.step(val_gen_loss)
     scheduler.step(val_info_loss)
     logging.info('Time: %.4f, Epoch [%d/%d], Val-gen-loss: %.4f, '
                  'Val-info-loss: %.4f' % (
-        delta_time, epoch, args.num_epochs, val_gen_loss, val_info_loss))
+                     delta_time, epoch, args.num_epochs, val_gen_loss, val_info_loss))
     logging.info('=' * 80)
 
 
@@ -239,7 +241,7 @@ def compare_outputs(images, questions, answers, categories,
             logging.info('Typed question: %s' % category_question)
             category_checks = sample_for_each_category(vqg, images[i], args)
             category_checks = [cat2name[idx] + ': ' + vocab.tokens_to_words(category_checks[j])
-                           for idx, j in enumerate(range(category_checks.size(0)))]
+                               for idx, j in enumerate(range(category_checks.size(0)))]
             logging.info('category checks: ' + ', '.join(category_checks))
 
         # Log the outputs.
@@ -252,6 +254,7 @@ def compare_outputs(images, questions, answers, categories,
                         question, category))
         logging.info("         ")
 
+
 def train(args):
     # Create model directory
     if not os.path.exists(args.model_path):
@@ -263,7 +266,7 @@ def train(args):
 
     # Config logging.
     log_format = '%(levelname)-8s %(message)s'
-    log_file_name = 'train_'+args.train_log_file_suffix+'.log'
+    log_file_name = 'train_' + args.train_log_file_suffix + '.log'
     logfile = os.path.join(args.model_path, log_file_name)
     logging.basicConfig(filename=logfile, level=logging.INFO, format=log_format)
     logging.getLogger().addHandler(logging.StreamHandler())
@@ -294,24 +297,24 @@ def train(args):
         train_weights = json.load(open(args.train_dataset_weights))
         train_weights = torch.DoubleTensor(train_weights)
         train_sampler = torch.utils.data.sampler.WeightedRandomSampler(
-                train_weights, len(train_weights))
+            train_weights, len(train_weights))
 
     if os.path.exists(args.val_dataset_weights):
         val_weights = json.load(open(args.val_dataset_weights))
         val_weights = torch.DoubleTensor(val_weights)
         val_sampler = torch.utils.data.sampler.WeightedRandomSampler(
-                val_weights, len(val_weights))
+            val_weights, len(val_weights))
 
     data_loader = get_loader(args.dataset, transform,
+                             args.batch_size, shuffle=False,
+                             num_workers=args.num_workers,
+                             max_examples=args.max_examples,
+                             sampler=train_sampler)
+    val_data_loader = get_loader(args.val_dataset, transform,
                                  args.batch_size, shuffle=False,
                                  num_workers=args.num_workers,
                                  max_examples=args.max_examples,
-                                 sampler=train_sampler)
-    val_data_loader = get_loader(args.val_dataset, transform,
-                                     args.batch_size, shuffle=False,
-                                     num_workers=args.num_workers,
-                                     max_examples=args.max_examples,
-                                     sampler=val_sampler)
+                                 sampler=val_sampler)
 
     print('Done loading data ............................')
 
@@ -320,7 +323,7 @@ def train(args):
     vqg = create_model(args, vocab)
     if args.load_model is not None:
         vqg.load_state_dict(torch.load(args.load_model))
-    
+
     logging.info("Done")
 
     # Loss criterion.
@@ -331,7 +334,7 @@ def train(args):
 
     alpha = None
 
-    if(args.bayes):
+    if (args.bayes):
         alpha = vqg.alpha
 
     # Setup GPUs.
@@ -340,7 +343,7 @@ def train(args):
         vqg.cuda()
         criterion.cuda()
         l2_criterion.cuda()
-        if(alpha is not None):
+        if (alpha is not None):
             alpha.cuda()
 
     gen_params = vqg.generator_parameters()
@@ -348,24 +351,24 @@ def train(args):
 
     learning_rate = args.learning_rate
     info_learning_rate = args.info_learning_rate
-    
+
     gen_optimizer = torch.optim.Adam(gen_params, lr=learning_rate)
     info_optimizer = torch.optim.Adam(info_params, lr=info_learning_rate)
 
-    if(args.step_two):
+    if (args.step_two):
         cycle_params = vqg.cycle_params()
         cycle_optimizer = torch.optim.Adam(cycle_params, lr=learning_rate)
 
-    if(args.center_loss):
+    if (args.center_loss):
         center_loss = CenterLoss(num_classes=args.num_categories, feat_dim=args.z_size, use_gpu=True)
         optimizer_centloss = torch.optim.SGD(center_loss.parameters(), lr=0.5)
-    
+
     scheduler = ReduceLROnPlateau(optimizer=gen_optimizer, mode='min',
                                   factor=0.5, patience=args.patience,
                                   verbose=True, min_lr=1e-7)
     cycle_scheduler = ReduceLROnPlateau(optimizer=gen_optimizer, mode='min',
-                                  factor=0.99, patience=args.patience,
-                                  verbose=True, min_lr=1e-7)
+                                        factor=0.99, patience=args.patience,
+                                        verbose=True, min_lr=1e-7)
     info_scheduler = ReduceLROnPlateau(optimizer=info_optimizer, mode='min',
                                        factor=0.5, patience=args.patience,
                                        verbose=True, min_lr=1e-7)
@@ -383,14 +386,14 @@ def train(args):
     regularisation_loss = 0.0
     c_loss = 0.0
     cycle_loss = 0.0
-    
-    if(args.step_two):
+
+    if (args.step_two):
         category_cycle_loss = 0.0
-    
-    if(args.bayes):
+
+    if (args.bayes):
         regularisation_loss = 0.0
 
-    if(args.center_loss):
+    if (args.center_loss):
         loss_center = 0.0
         c_loss = 0.0
 
@@ -408,9 +411,9 @@ def train(args):
                 answers = answers.cuda()
                 categories = categories.cuda()
                 qindices = qindices.cuda()
-                if(args.bayes):
+                if (args.bayes):
                     alpha = alpha.cuda()
-            
+
             # Eval now.
             if (args.eval_every_n_steps is not None and
                     n_steps >= args.eval_every_n_steps and
@@ -424,24 +427,24 @@ def train(args):
             vqg.train()
             gen_optimizer.zero_grad()
             info_optimizer.zero_grad()
-            if(args.step_two):
+            if (args.step_two):
                 cycle_optimizer.zero_grad()
-            if(args.center_loss):
+            if (args.center_loss):
                 optimizer_centloss.zero_grad()
-            
+
             image_features = vqg.encode_images(images)
             category_features = vqg.encode_categories(categories)
-            
+
             # Question generation.
             t_mus, t_logvars, ts = vqg.encode_into_t(image_features, category_features)
-            
-            if(args.center_loss):
+
+            if (args.center_loss):
                 loss_center = 0.0
                 c_loss = center_loss(ts, categories)
-                loss_center += args.lambda_centerloss *  c_loss
+                loss_center += args.lambda_centerloss * c_loss
                 c_loss = c_loss.item()
                 loss_center.backward(retain_graph=True)
-            
+
                 for param in center_loss.parameters():
                     param.grad.data *= (1. / args.lambda_centerloss)
 
@@ -450,8 +453,8 @@ def train(args):
             qlengths_prev = process_lengths(questions)
 
             (outputs, _, _), pred_ques = vqg.decode_questions(
-                    image_features, ts, questions=questions,
-                    teacher_forcing_ratio=1.0)
+                image_features, ts, questions=questions,
+                teacher_forcing_ratio=1.0)
 
             # Reorder the questions based on length.
             questions = torch.index_select(questions, 0, qindices)
@@ -462,17 +465,17 @@ def train(args):
 
             # Convert the output from MAX_LEN list of (BATCH x VOCAB) ->
             # (BATCH x MAX_LEN x VOCAB).
-            
+
             outputs = [o.unsqueeze(1) for o in outputs]
             outputs = torch.cat(outputs, dim=1)
-            
+
             outputs = torch.index_select(outputs, 0, qindices)
 
-            if(args.step_two):
+            if (args.step_two):
                 category_cycle_loss = 0.0
                 category_cycle = vqg.encode_questions(pred_ques, qlengths)
                 cycle_loss = criterion(category_cycle, categories)
-                category_cycle_loss += args.lambda_c_cycle * cycle_loss 
+                category_cycle_loss += args.lambda_c_cycle * cycle_loss
                 cycle_loss = cycle_loss.item()
                 category_cycle_loss.backward(retain_graph=True)
                 cycle_optimizer.step()
@@ -489,8 +492,9 @@ def train(args):
             gen_loss = gen_loss.item()
 
             # Variational loss.
-            if(args.bayes):
-                kl_loss = -0.5 * torch.sum(1 + t_logvars + alpha.pow(2).log() - alpha.pow(2) * ( t_mus.pow(2) + t_logvars.exp()))
+            if (args.bayes):
+                kl_loss = -0.5 * torch.sum(
+                    1 + t_logvars + alpha.pow(2).log() - alpha.pow(2) * (t_mus.pow(2) + t_logvars.exp()))
                 regularisation_loss = l2_criterion(alpha.pow(-1), torch.ones_like(alpha))
                 total_loss += args.lambda_t * kl_loss + args.lambda_reg * regularisation_loss
                 kl_loss = kl_loss.item()
@@ -502,6 +506,7 @@ def train(args):
 
             # Generator Backprop.
             total_loss.backward(retain_graph=True)
+            torch.nn.utils.clip_grad_norm_(gen_params, 5)
             gen_optimizer.step()
 
             # Reconstruction loss.
@@ -513,11 +518,11 @@ def train(args):
                 category_targets = category_features.detach()
                 image_targets = image_features.detach()
                 recon_image_features, recon_category_features = vqg.reconstruct_inputs(
-                        image_targets, category_targets)
+                    image_targets, category_targets)
 
                 # Category reconstruction loss.
                 if not args.no_category_space:
-                    recon_c_loss = l2_criterion(recon_category_features, category_targets)           # changed to criterion2
+                    recon_c_loss = l2_criterion(recon_category_features, category_targets)  # changed to criterion2
                     total_info_loss += args.lambda_c * recon_c_loss
                     recon_category_loss = recon_c_loss.item()
 
@@ -529,6 +534,7 @@ def train(args):
 
                 # Info backprop.
                 total_info_loss.backward()
+                torch.nn.utils.clip_grad_norm_(info_params, 5)
                 info_optimizer.step()
 
             # Print log info
@@ -544,7 +550,7 @@ def train(args):
                                 recon_image_loss, recon_category_loss, cycle_loss, regularisation_loss))
 
             # Save the models
-            if args.save_step is not None and (i+1) % args.save_step == 0:
+            if args.save_step is not None and (i + 1) % args.save_step == 0:
                 torch.save(vqg.state_dict(),
                            os.path.join(args.model_path,
                                         'vqg-tf-%d-%d.pkl'
@@ -552,12 +558,12 @@ def train(args):
 
         torch.save(vqg.state_dict(),
                    os.path.join(args.model_path,
-                                'vqg-tf-%d.pkl' % (epoch+1)))
+                                'vqg-tf-%d.pkl' % (epoch + 1)))
 
         torch.save(center_loss.state_dict(),
-                           os.path.join(args.model_path,
-                                        'closs-tf-%d-%d.pkl'
-                                        % (epoch + 1, i + 1)))
+                   os.path.join(args.model_path,
+                                'closs-tf-%d-%d.pkl'
+                                % (epoch + 1, i + 1)))
 
         # Evaluation and learning rate updates.
         run_eval(vqg, val_data_loader, criterion, l2_criterion,
@@ -568,7 +574,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Session parameters.
-    
+
     parser.add_argument('--model-path', type=str, default='./weights_with_centerloss/finetuned/',
                         help='Path for saving trained models')
     parser.add_argument('--crop-size', type=int, default=224,
@@ -605,7 +611,7 @@ if __name__ == '__main__':
                         help='coefficient to be added with the image recon loss.')
     parser.add_argument('--lambda_centerloss', type=float, default=2.0,
                         help='coefficient for center loss')
-    
+
     # Data parameters.
     parser.add_argument('--vocab-path', type=str,
                         default='data/processed/vocab_iq.json',
@@ -628,11 +634,10 @@ if __name__ == '__main__':
     parser.add_argument('--load-model', type=str, default=None,
                         help='Location of where the model weights are.')
 
-
     # Model parameters
     parser.add_argument('--rnn_cell', type=str, default='LSTM',
                         help='Type of rnn cell (GRU, RNN or LSTM).')
-    parser.add_argument('--hidden_size', type=int, default=256,           # changed from 512
+    parser.add_argument('--hidden_size', type=int, default=256,  # changed from 512
                         help='Dimension of lstm hidden states.')
     parser.add_argument('--num_layers', type=int, default=2,
                         help='Number of layers in lstm.')
@@ -675,10 +680,10 @@ if __name__ == '__main__':
     parser.add_argument('--bayes', type=bool, default=True,
                         help='For adding a bayes-vae prior.')
 
-    parser.add_argument('--train_log_file_suffix',default='train',type=str)
+    parser.add_argument('--train_log_file_suffix', default='train', type=str)
 
     args = parser.parse_args()
-    
+
     train(args)
 
     # Hack to disable errors for importing Vocabulary. Ignore this line.
